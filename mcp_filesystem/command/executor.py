@@ -313,6 +313,11 @@ class CommandExecutor:
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONDONTWRITEBYTECODE"] = "1"
         env["PYTHONHASHSEED"] = "random"
+        
+        # exec / sandbox safe initialization
+        env["OPENBLAS_NUM_THREADS"] = "1"
+        env["OMP_NUM_THREADS"] = "1"
+        env["MKL_NUM_THREADS"] = "1"
 
         # Disable pip/npm from installing (even if command gets through)
         env["PIP_NO_INPUT"] = "1"

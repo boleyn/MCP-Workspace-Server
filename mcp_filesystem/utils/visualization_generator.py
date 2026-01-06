@@ -227,8 +227,7 @@ class VisualizationGenerator:
             if not self.images_dir:
                 return {
                     "success": False,
-                    "error": "工作区路径未设置，无法保存图片",
-                    "type": "mermaid"
+                    "error": "工作区路径未设置，无法保存图片"
                 }
             
             file_path = self.images_dir / filename
@@ -269,10 +268,16 @@ class VisualizationGenerator:
             # 如果配置了 base_url，则拼接完整 URL
             image_url = f"{self.base_url}{relative_url}" if self.base_url else relative_url
 
+            # 计算文件相对路径
+            if self.workspace_path:
+                file_relative = f"/{file_path.relative_to(self.workspace_path)}".replace("\\", "/")
+            else:
+                file_relative = f"/images/{filename}"
+
             return {
                 "success": True,
                 "url": image_url,
-                "type": "mermaid",
+                "file": file_relative,
                 "chart_type": "flowchart",
                 "message": "Mermaid图表渲染成功"
             }
@@ -280,8 +285,7 @@ class VisualizationGenerator:
         except Exception as e:
             return {
                 "success": False,
-                "error": f"Mermaid渲染失败: {str(e)}",
-                "type": "mermaid"
+                "error": f"Mermaid渲染失败: {str(e)}"
             }
     
     async def _generate_html(
@@ -294,8 +298,7 @@ class VisualizationGenerator:
             if not self.workspace_path:
                 return {
                     "success": False,
-                    "error": "工作区路径未设置，无法保存文件",
-                    "type": "html"
+                    "error": "工作区路径未设置，无法保存文件"
                 }
             
             # 生成唯一文件名
@@ -312,8 +315,7 @@ class VisualizationGenerator:
             if not self.images_dir:
                 return {
                     "success": False,
-                    "error": "工作区路径未设置，无法保存图片",
-                    "type": "html"
+                    "error": "工作区路径未设置，无法保存图片"
                 }
             
             images_png_path = self.images_dir / png_filename
@@ -371,20 +373,22 @@ class VisualizationGenerator:
             # 如果配置了 base_url，则拼接完整 URL
             image_url = f"{self.base_url}{relative_url}" if self.base_url else relative_url
             
+            # 使用已有路径变量计算相对路径
+            html_file = f"/{html_file_path.relative_to(self.workspace_path)}".replace("\\", "/")
+            png_file = f"/{images_png_path.relative_to(self.workspace_path)}".replace("\\", "/")
+            
             return {
                 "success": True,
                 "url": image_url,
-                "type": "html",
-                "html_file": html_filename,
-                "png_file": png_filename,
+                "html_file": html_file,
+                "png_file": png_file,
                 "message": "HTML渲染为PNG成功"
             }
             
         except Exception as e:
             return {
                 "success": False,
-                "error": f"HTML渲染失败: {str(e)}",
-                "type": "html"
+                "error": f"HTML渲染失败: {str(e)}"
             }
 
     async def _render_mermaid(self, code: str, options: Dict, output_format: str) -> bytes:
@@ -453,7 +457,7 @@ class VisualizationGenerator:
 
         处理内容：
         1. 将字面 \\n \\t \\r 转换为真正的换行符/制表符
-        2. 将 subgraph 名称和节点标签中的英文括号 () 替换为中文括号（），避免解析错误
+        2. 将 subgraph 名称和节点标签中的括号 () 替换为其他符号，避免解析错误
         """
         import re
 
@@ -462,42 +466,50 @@ class VisualizationGenerator:
 
         # 2. 处理 subgraph 中的括号
         # 匹配: subgraph "名称 (备注)" 或 subgraph 名称 (备注)
-        # 将英文括号 () 替换为中文括号（）
-        def replace_parens_to_chinese(text):
-            return text.replace('(', '（').replace(')', '）')
+        # 将括号替换为方括号或破折号
+        def replace_subgraph_parens(match):
+            prefix = match.group(1)  # subgraph
+            content = match.group(2)  # 名称内容
+            # 将 (xxx) 替换为 - xxx
+            content = re.sub(r'\s*\(([^)]*)\)', r' - \1', content)
+            return prefix + content
 
         # 处理带引号的 subgraph: subgraph "xxx (yyy)"
         code = re.sub(
             r'(subgraph\s+)"([^"]*)"',
-            lambda m: m.group(1) + '"' + replace_parens_to_chinese(m.group(2)) + '"',
+            lambda m: m.group(1) + '"' + re.sub(r'\s*\(([^)]*)\)', r' - \1', m.group(2)) + '"',
             code
         )
 
         # 处理不带引号的 subgraph: subgraph xxx (yyy) 直到换行
         code = re.sub(
             r'(subgraph\s+)([^\n"]+?)(\n)',
-            lambda m: m.group(1) + replace_parens_to_chinese(m.group(2)) + m.group(3),
+            lambda m: m.group(1) + re.sub(r'\s*\(([^)]*)\)', r' - \1', m.group(2)) + m.group(3),
             code
         )
 
         # 3. 处理节点标签中的括号（方括号内的内容）
-        # 匹配: [名称 (备注)] 将其中的英文括号替换为中文括号
-        code = re.sub(
-            r'\[([^\]]*)\]',
-            lambda m: '[' + replace_parens_to_chinese(m.group(1)) + ']',
-            code
-        )
+        # 匹配: [名称 (备注)] 将其中的 () 替换
+        def replace_bracket_parens(match):
+            content = match.group(1)
+            # 将 (xxx) 替换为 - xxx
+            content = re.sub(r'\s*\(([^)]*)\)', r' - \1', content)
+            return '[' + content + ']'
+
+        code = re.sub(r'\[([^\]]*\([^\]]*)\]', replace_bracket_parens, code)
 
         # 4. 处理连接标签中的括号
-        # 匹配: -- "标签 (备注)" --> 或 |标签 (备注)|
+        # 匹配: -- "标签 (备注)" --> 或 -- "标签(备注)" -->
+        def replace_edge_label_parens(match):
+            prefix = match.group(1)  # -- "
+            content = match.group(2)  # 标签内容
+            suffix = match.group(3)  # " -->
+            content = re.sub(r'\s*\(([^)]*)\)', r' - \1', content)
+            return prefix + content + suffix
+
         code = re.sub(
-            r'(--\s*")([^"]*)(">)',
-            lambda m: m.group(1) + replace_parens_to_chinese(m.group(2)) + m.group(3),
-            code
-        )
-        code = re.sub(
-            r'(\|)([^|]*)(\|)',
-            lambda m: m.group(1) + replace_parens_to_chinese(m.group(2)) + m.group(3),
+            r'(--\s*"|\|\s*)([^"|]*\([^"|]*)("|\|)',
+            replace_edge_label_parens,
             code
         )
 

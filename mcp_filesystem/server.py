@@ -887,19 +887,19 @@ async def create_excel_from_template(
 async def generate_image(
     mermaid_code: Annotated[
         str,
-        Field(description="Mermaid代码，将渲染为svg图片。（与html_code二选一）")
+        Field(description="时序图、流程图等逻辑关系图使用，渲染为PNG图片。（与html_code二选一）")
     ] = "",
     html_code: Annotated[
         str,
-        Field(description="HTML代码，将渲染为PNG图片（图表、架构图推荐使用）。")
+        Field(description="HTML代码，图表、graph、架构图等使用，渲染为PNG图片。")
     ] = "",
     ctx: Context = None,
 ) -> Any:
-    """生成图表/流程图等返回图像url。
+    """生成图表/架构图等返回图像url。
     
     Examples:
         generate_image(mermaid_code="flowchart TD\\nA[开始] --> B[结束]")
-        generate_image(html_code="<html><body><h1>Hello World</h1><p>这是一个测试</p></body></html>")
+        generate_image(html_code="<html><body><h1>System Architecture</h1></body></html>")
     """
     # 支持的图表类型：line/bar/column/pie/area/scatter/histogram/boxplot/radar/network-graph/treemap/sankey/funnel/organization-chart/word-cloud/liquid/auto
     try:

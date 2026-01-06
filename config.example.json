@@ -13,7 +13,7 @@
     "enabled": true,
     "network_isolated": true,
     "limits": {
-      "max_memory_mb": 512,
+      "max_memory_mb": 2048,
       "max_cpu_seconds": 60,
       "max_file_size_mb": 100,
       "max_processes": 32,
@@ -37,6 +37,31 @@
   "fs": {
     "max_table_chars": 20000,
     "max_doc_chars": 20000
+  },
+  "lint": {
+    "enabled": true,
+    "linters": {
+      "python": {
+        "enabled": true,
+        "use_pyflakes": true,
+        "_comment": "Python语法检查使用ast（零依赖），代码质量检查使用pyflakes（可选）"
+      },
+      "json": {
+        "enabled": true,
+        "strict": true,
+        "_comment": "JSON格式验证使用json.loads（零依赖）"
+      },
+      "html": {
+        "enabled": true,
+        "check_xss": true,
+        "_comment": "HTML结构验证和XSS安全检查"
+      },
+      "svg": {
+        "enabled": true,
+        "_comment": "SVG的XML格式验证（零依赖）"
+      }
+    },
+    "_comment": "文件Lint校验配置。校验结果不会阻止文件写入，而是作为反馈信息返回给智能体。"
   },
   "kb": {
     "base_url": "http://localhost:3000",

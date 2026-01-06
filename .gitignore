@@ -13,6 +13,7 @@ docker/.env
 .vs_code/*
 .mypy_cache/*
 .pytest_cache/*
+tests/*
 .ruff_cache/*
 .aider*
 CLAUDE.md

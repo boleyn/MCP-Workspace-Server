@@ -29,6 +29,40 @@ from ..grep import GrepTools
 
 logger = get_logger(__name__)
 
+
+async def _add_lint_result(result: Dict[str, Any], abs_path: Path, content: Optional[str] = None) -> Dict[str, Any]:
+    """为文件写入结果添加 lint 校验信息.
+    
+    Args:
+        result: 原始结果字典
+        abs_path: 文件绝对路径
+        content: 文件内容（可选，如果不提供则从文件读取）
+        
+    Returns:
+        添加了 lint 信息的结果字典
+        
+    Note:
+        只有在有错误或警告时才添加 lint 字段，完全通过时不返回 lint 信息，
+        以减少智能体的认知负担。
+    """
+    try:
+        from ..lint import lint_file
+        lint_result = await lint_file(abs_path, content)
+        if lint_result:
+            # 只有在有问题时才添加 lint 字段
+            # 完全通过（没有错误也没有警告）时不返回 lint 信息
+            if not lint_result.get("passed") or lint_result.get("errors") or lint_result.get("warnings"):
+                result["lint"] = lint_result
+    except Exception as e:
+        logger.warning(f"Lint check failed for {abs_path}: {e}")
+        # Lint 检查失败时也添加错误信息
+        result["lint"] = {
+            "checked": False,
+            "passed": True,  # 不阻止文件操作
+            "error": f"Lint check failed: {str(e)}"
+        }
+    return result
+
 # 配置相关：读取 config.json 中的 fs 配置
 CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.json"
 _config_cache: Optional[Dict[str, Any]] = None
@@ -877,11 +911,12 @@ async def fs_write(
             await anyio.to_thread.run_sync(
                 lambda: abs_path.write_text(content, encoding=encoding)
             )
-            return {
+            result = {
                 "success": True,
                 "path": virtual_path,
                 "size": len(content.encode(encoding)),
             }
+            return await _add_lint_result(result, abs_path, content)
         elif isinstance(content, list):
             # 2D 数组：格式化后写入
             lines = []
@@ -901,11 +936,12 @@ async def fs_write(
             await anyio.to_thread.run_sync(
                 lambda: abs_path.write_text(csv_text, encoding=encoding)
             )
-            return {
+            result = {
                 "success": True,
                 "path": virtual_path,
                 "size": len(csv_text.encode(encoding)),
             }
+            return await _add_lint_result(result, abs_path, csv_text)
         else:
             raise ValueError("CSV content must be a string or 2D array")
     
@@ -922,11 +958,12 @@ async def fs_write(
         await anyio.to_thread.run_sync(
             lambda: abs_path.write_text(content, encoding=encoding)
         )
-        return {
+        result = {
             "success": True,
             "path": virtual_path,
             "size": len(content.encode(encoding)),
         }
+        return await _add_lint_result(result, abs_path, content)
 
     else:
         # 文本文件
@@ -942,11 +979,12 @@ async def fs_write(
         await anyio.to_thread.run_sync(
             lambda: abs_path.write_text(content, encoding=encoding)
         )
-        return {
+        result = {
             "success": True,
             "path": virtual_path,
             "size": len(content.encode(encoding)),
         }
+        return await _add_lint_result(result, abs_path, content)
 
 
 async def fs_ops(

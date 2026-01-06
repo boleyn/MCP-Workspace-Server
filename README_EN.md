@@ -2,7 +2,7 @@
 
 **English** | **[中文](./README.md)**
 
-[![License](https://img.shields.io/github/license/safurrier/mcp-filesystem.svg)](LICENSE)
+[![License](assets/license-badge.svg)](LICENSE)
 
 🚀 **One MCP, Complete Agent Capabilities!**
 

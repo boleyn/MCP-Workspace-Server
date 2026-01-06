@@ -62,6 +62,34 @@ async def healthcheck(request: Request):
     })
 
 
+async def workspace_viewer(request: Request):
+    """Serve the workspace viewer HTML page."""
+    static_dir = Path(__file__).parent.parent / "static"
+    viewer_path = static_dir / "workspace_viewer.html"
+    
+    if not viewer_path.exists():
+        return JSONResponse({
+            "success": False,
+            "error": "Workspace viewer not found"
+        }, status_code=404)
+    
+    return FileResponse(viewer_path, media_type="text/html")
+
+
+async def portal_homepage(request: Request):
+    """Serve the project homepage."""
+    portal_dir = Path(__file__).parent.parent / "portal"
+    index_path = portal_dir / "index.html"
+    
+    if not index_path.exists():
+        return JSONResponse({
+            "success": False,
+            "error": "Homepage not found"
+        }, status_code=404)
+    
+    return FileResponse(index_path, media_type="text/html")
+
+
 async def verify_admin_token(request: Request) -> bool:
     """Verify Bearer token authentication for admin endpoints."""
     expected_token = get_admin_token()
@@ -689,9 +717,18 @@ def _docx_bytes_to_markdown(content_bytes: bytes) -> str:
     return "\n\n".join(parts)
 
 
-def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
-    """将文件二进制内容转换为 Markdown 文本。"""
+def _bytes_to_markdown(content_bytes: bytes, suffix: str, max_rows: int = 200) -> str:
+    """将文件二进制内容转换为 Markdown 文本。
+    
+    Args:
+        content_bytes: 文件的二进制内容
+        suffix: 文件后缀名
+        max_rows: 最大读取行数，-1 表示读取全部，默认 200 行（向后兼容）
+    """
     ext = (suffix or "").lower()
+    
+    # 处理 max_rows 参数：只有 -1 表示读取全部
+    nrows = None if max_rows == -1 else max_rows
 
     if ext in TEXT_EXTENSIONS or not ext:
         return content_bytes.decode("utf-8", errors="replace")
@@ -737,9 +774,32 @@ def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
                 # openpyxl 检查失败，继续使用 pandas
                 logger.warning(f"openpyxl check failed: {e}, falling back to pandas")
             
+            # 如果 nrows=None（即 max_rows=-1），且有多个 sheet，则读取所有 sheet
+            if nrows is None and sheet_names and len(sheet_names) > 1:
+                logger.info(f"Reading all {len(sheet_names)} sheets with unlimited rows")
+                all_sheets_content = []
+                
+                for sheet_name in sheet_names:
+                    try:
+                        df = pd.read_excel(BytesIO(content_bytes), sheet_name=sheet_name, nrows=None, engine=None)
+                        # 将 NaN 值替换为空字符串，避免在 markdown 中显示为 "nan"
+                        df = df.fillna('')
+                        
+                        markdown_content = df.to_markdown(index=False)
+                        if markdown_content and markdown_content.strip():
+                            all_sheets_content.append(f"## 工作表: {sheet_name}\n\n{markdown_content}")
+                    except Exception as e:
+                        logger.warning(f"Failed to read sheet '{sheet_name}': {e}")
+                        all_sheets_content.append(f"## 工作表: {sheet_name}\n\n*读取失败: {str(e)}*")
+                
+                if all_sheets_content:
+                    return "\n\n---\n\n".join(all_sheets_content)
+                else:
+                    return "*所有工作表都为空或无数据*"
+            
             # 使用 pandas 读取（优先使用有数据的表，否则使用第一个）
             target_sheet = preferred_sheet if preferred_sheet else 0
-            df = pd.read_excel(BytesIO(content_bytes), sheet_name=target_sheet, nrows=200, engine=None)
+            df = pd.read_excel(BytesIO(content_bytes), sheet_name=target_sheet, nrows=nrows, engine=None)
             
             # 检查 DataFrame 是否真的为空
             if df.empty:
@@ -761,11 +821,15 @@ def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
                             if sheet_name == target_sheet:
                                 continue
                             try:
-                                df_alt = pd.read_excel(BytesIO(content_bytes), sheet_name=sheet_name, nrows=200)
+                                df_alt = pd.read_excel(BytesIO(content_bytes), sheet_name=sheet_name, nrows=nrows)
                                 if not df_alt.empty:
-                                    # 清理 DataFrame
-                                    df_alt = df_alt.dropna(how='all').dropna(axis=1, how='all')
+                                    # max_rows=-1 时不过滤空列空行，其他情况清理 DataFrame
+                                    if nrows is not None:
+                                        df_alt = df_alt.dropna(how='all').dropna(axis=1, how='all')
+                                    
                                     if not df_alt.empty:
+                                        # 将 NaN 值替换为空字符串，避免在 markdown 中显示为 "nan"
+                                        df_alt = df_alt.fillna('')
                                         markdown_content = df_alt.to_markdown(index=False)
                                         if markdown_content and markdown_content.strip():
                                             return f"*工作表: {sheet_name}*\n\n{markdown_content}"
@@ -777,12 +841,15 @@ def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
                     logger.warning(f"Failed to read all sheets: {e2}")
                     return "*文件为空或没有数据*"
             
-            # 清理 DataFrame：移除完全为空的行和列
-            df = df.dropna(how='all').dropna(axis=1, how='all')
+            # max_rows=-1 时不过滤空列空行，其他情况清理 DataFrame：移除完全为空的行和列
+            if nrows is not None:
+                df = df.dropna(how='all').dropna(axis=1, how='all')
             
             if df.empty:
                 return "*文件为空或没有数据*"
             
+            # 将 NaN 值替换为空字符串，避免在 markdown 中显示为 "nan"
+            df = df.fillna('')
             markdown_content = df.to_markdown(index=False)
             if not markdown_content or not markdown_content.strip():
                 return "*无法生成预览内容*"
@@ -812,9 +879,9 @@ def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
             raise ImportError("pandas not installed for CSV preview") from e
 
         try:
-            df = pd.read_csv(BytesIO(content_bytes), nrows=200)
+            df = pd.read_csv(BytesIO(content_bytes), nrows=nrows)
         except UnicodeDecodeError:
-            df = pd.read_csv(BytesIO(content_bytes), nrows=200, encoding="latin1")
+            df = pd.read_csv(BytesIO(content_bytes), nrows=nrows, encoding="latin1")
         if df.empty:
             return "*文件为空或没有数据*"
         markdown_content = df.to_markdown(index=False)
@@ -865,11 +932,32 @@ def _bytes_to_markdown(content_bytes: bytes, suffix: str) -> str:
 
 
 async def api_workspace_file_preview(request: Request):
-    """预览工作区文件。非文本文件转换为 Markdown 文本返回。"""
+    """预览工作区文件。非文本文件转换为 Markdown 文本返回。
+    
+    Query Parameters:
+        user_id: 用户ID
+        chat_id: 聊天ID
+        file_path: 文件路径
+        max_rows: 最大读取行数（可选），不传或传正整数表示读取指定行数（默认200），-1表示读取全部
+    """
     try:
         user_id = request.query_params.get("user_id") or request.headers.get("x-user-id")
         chat_id = request.query_params.get("chat_id") or request.headers.get("x-chat-id")
         file_path = request.query_params.get("file_path")
+        
+        # 获取 max_rows 参数，默认 200 行（向后兼容）
+        max_rows_param = request.query_params.get("max_rows")
+        if max_rows_param is not None:
+            try:
+                max_rows = int(max_rows_param)
+                # -1 表示读取全部，其他小于 1 的值使用默认值
+                if max_rows < 1 and max_rows != -1:
+                    max_rows = 200
+                # max_rows == -1 时保持 -1，传递给 _bytes_to_markdown 处理
+            except (ValueError, TypeError):
+                max_rows = 200  # 解析失败时使用默认值
+        else:
+            max_rows = 200  # 未提供参数时使用默认值
 
         if not user_id or not chat_id:
             return JSONResponse({
@@ -947,7 +1035,7 @@ async def api_workspace_file_preview(request: Request):
         suffix = target_file.suffix.lower()
 
         try:
-            content_md = _bytes_to_markdown(content_bytes, suffix)
+            content_md = _bytes_to_markdown(content_bytes, suffix, max_rows=max_rows)
             # 确保content_md是字符串类型且不为None
             if content_md is None:
                 content_md = "*无法生成预览内容*"
@@ -1322,9 +1410,10 @@ async def api_workspace_download(request: Request):
 async def api_workspace_file_upload(request: Request):
     """Upload files to workspace using multipart/form-data.
 
-    支持两种方式：
+    支持三种方式：
     - 传统文件字段：`files`（可多选）或 `file`
     - 远程 URL 下载：`file_url` 或 `url`
+    - 文本+文件名：`text`（文本内容）和 `filename`（文件名）
     """
     try:
         # Get user_id and chat_id from query params or headers
@@ -1365,6 +1454,10 @@ async def api_workspace_file_upload(request: Request):
         # Parse multipart form data
         form = await request.form()
         
+        # Check for text + filename upload (new method)
+        text_content = form.get("text")
+        filename_from_text = form.get("filename")
+        
         # Get files from form (support multiple files with same field name)
         files = form.getlist("files")
         if not files:
@@ -1376,10 +1469,10 @@ async def api_workspace_file_upload(request: Request):
         if not file_urls:
             file_urls = form.getlist("url")
         
-        if not files and not file_urls:
+        if not files and not file_urls and not (text_content and filename_from_text):
             return JSONResponse({
                 "success": False,
-                "error": "No files provided. Use 'files'/'file' or provide 'file_url'/'url'."
+                "error": "No files provided. Use 'files'/'file', provide 'file_url'/'url', or use 'text' + 'filename'."
             }, status_code=400)
 
         # Get file size limit from config
@@ -1408,6 +1501,76 @@ async def api_workspace_file_upload(request: Request):
 
         uploaded_files = []
         errors = []
+
+        # Process text + filename upload (if provided)
+        if text_content is not None and filename_from_text:
+            try:
+                # Validate filename
+                if not isinstance(filename_from_text, str) or not filename_from_text.strip():
+                    errors.append({
+                        "file": "text+filename",
+                        "error": "Invalid filename"
+                    })
+                else:
+                    # Security: sanitize filename to prevent path traversal
+                    safe_filename = os.path.basename(filename_from_text).replace("..", "").replace("/", "").replace("\\", "")
+                    if not safe_filename:
+                        errors.append({
+                            "file": filename_from_text,
+                            "error": "Invalid filename"
+                        })
+                    else:
+                        # Convert text to bytes (UTF-8 encoding)
+                        if isinstance(text_content, str):
+                            content_bytes = text_content.encode("utf-8")
+                        else:
+                            # If it's already bytes, use as-is
+                            content_bytes = text_content if isinstance(text_content, bytes) else str(text_content).encode("utf-8")
+                        
+                        file_size = len(content_bytes)
+                        
+                        # Check file size limit
+                        if file_size > max_file_size_bytes:
+                            errors.append({
+                                "file": safe_filename,
+                                "error": f"File too large. Maximum size: {max_file_size_mb}MB"
+                            })
+                        else:
+                            # Build target file path
+                            target_file = target_path / safe_filename
+                            
+                            # Check if file already exists
+                            overwrite = target_file.exists()
+                            
+                            # Write file
+                            target_file.parent.mkdir(parents=True, exist_ok=True)
+                            with open(target_file, "wb") as f:
+                                f.write(content_bytes)
+                            
+                            # Get relative path from workspace root
+                            try:
+                                relative_path = str(target_file.relative_to(ws_path))
+                            except ValueError:
+                                relative_path = safe_filename
+                            
+                            uploaded_files.append({
+                                "filename": safe_filename,
+                                "original_filename": filename_from_text,
+                                "path": relative_path,
+                                "size": file_size,
+                                "size_human": human_size(file_size),
+                                "overwritten": overwrite,
+                                "source": "text"
+                            })
+                            
+                            logger.info(f"Uploaded file from text: {target_file} ({file_size} bytes)")
+                            
+            except Exception as e:
+                logger.error(f"Error uploading file from text: {e}", exc_info=True)
+                errors.append({
+                    "file": filename_from_text if filename_from_text else "text+filename",
+                    "error": str(e)
+                })
 
         # Process each file
         for file_item in files:
@@ -2428,8 +2591,14 @@ def add_http_routes(app: Starlette) -> None:
     """
     routes = [
         # Health/ready probes
-        Route("/", endpoint=healthcheck, methods=["GET"]),
         Route("/health", endpoint=healthcheck, methods=["GET"]),
+
+        # Portal Homepage
+        Route("/", endpoint=portal_homepage, methods=["GET"]),
+        Route("/portal", endpoint=portal_homepage, methods=["GET"]),
+
+        # Workspace Viewer
+        Route("/workspace/viewer", endpoint=workspace_viewer, methods=["GET"]),
 
         # Admin API routes (must be before wildcard routes)
         Route("/admin/stats", endpoint=admin_stats, methods=["GET"]),

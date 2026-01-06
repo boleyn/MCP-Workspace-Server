@@ -127,6 +127,32 @@ async def exec_command(
     else:
         logger.info(f"exec_command: Using code parameter, size={len(code)} bytes")
 
+    # 执行前进行 lint 校验（Python 语法检查）
+    logger.info("exec_command: Performing lint check before execution...")
+    try:
+        from ..lint.python_linter import PythonLinter
+        linter = PythonLinter()
+        
+        # 创建临时 Path 对象用于 lint（不实际写入文件）
+        temp_path = Path(f"<exec_code>.py")
+        lint_result = await linter.lint(temp_path, content=code_content)
+        
+        if not lint_result.passed:
+            logger.warning(f"exec_command: Code has lint errors, aborting execution")
+            return {
+                "success": False,
+                "exit_code": -1,
+                "stdout": "",
+                "stderr": "Code has syntax errors, execution aborted",
+                "execution_time": 0.0,
+                "timed_out": False,
+                "lint": lint_result.to_dict(),
+            }
+        else:
+            logger.info("exec_command: Lint check passed")
+    except Exception as e:
+        logger.warning(f"exec_command: Lint check failed: {e}, continuing execution")
+
     # 准备参数列表
     args_list = args or []
     logger.info(f"exec_command: args_list={args_list}")

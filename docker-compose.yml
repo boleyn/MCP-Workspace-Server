@@ -33,7 +33,12 @@ services:
       # 代码挂载 - git pull 后 restart 生效
       - ./mcp_filesystem:/app/mcp_filesystem:ro
       - ./excel_templates:/app/excel_templates:ro
+      - ./static:/app/static:ro
+      - ./portal:/app/portal:ro
       - ./pyproject.toml:/app/pyproject.toml:ro
+      # 时区配置
+      - /etc/localtime:/etc/localtime:ro
+      - /etc/timezone:/etc/timezone:ro
     
     environment:
       - FASTMCP_HOST=0.0.0.0
