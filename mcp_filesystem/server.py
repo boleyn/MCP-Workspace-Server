@@ -450,13 +450,17 @@ mcp = FilesystemFastMCP(
 
 @mcp.tool()
 async def fs_read(
-    path: Annotated[Union[str, List[str]], Field(description="文件路径或路径列表")],
+    path: Annotated[Union[str, List[str]], Field(description="文件路径或路径列表。支持单文件或批量读取")],
     ctx: Context,
-    sheet: Annotated[str, Field(description="Excel工作表名（默认第一个）")] = "",
-    range: Annotated[str, Field(description="Excel读取范围如A1:C10")] = "",
-    line_range: Annotated[str, Field(description="文档按行读取范围，如'10:','20:50'")] = "",
+    sheet: Annotated[str, Field(description="仅Excel：工作表名（空=第一个工作表）")] = "",
+    range: Annotated[str, Field(description="仅Excel：读取范围，如A1:C10（空=全表）")] = "",
+    line_range: Annotated[str, Field(description="仅文本：按行读取范围，如'10:'或'20:50'（空=全文）")] = "",
 ) -> Any:
-    """读取文件，自动识别格式（md/txt/json/csv/xlsx/py）。支持批量读取。
+    """读取文件，自动识别格式（md/txt/json/csv/xlsx/py等）。支持批量读取。
+    
+    - path 为列表时，返回批量结果
+    - sheet/range 仅对 xlsx 生效
+    - line_range 仅对文本文件生效
     
     Examples:
         fs_read("README.md")
@@ -485,13 +489,16 @@ async def fs_read(
 @mcp.tool()
 async def fs_write(
     path: Annotated[str, Field(description="文件路径")],
-    content: Annotated[Any, Field(description="内容：字符串/dict/2D数组")],
+    content: Annotated[Any, Field(description="内容：字符串/字典(JSON)/二维数组(Excel/CSV)")],
     ctx: Context,
-    overwrite: Annotated[bool, Field(description="覆盖已存在文件")] = True,
-    append: Annotated[bool, Field(description="追加模式")] = False,
-    sheet: Annotated[str, Field(description="Excel工作表名")] = "",
+    overwrite: Annotated[bool, Field(description="覆盖已存在文件（append=false时生效）")] = True,
+    append: Annotated[bool, Field(description="追加模式（仅文本/CSV适用）")] = False,
+    sheet: Annotated[str, Field(description="仅Excel：工作表名（空=默认）")] = "",
 ) -> Any:
     """创建或覆盖文件。根据扩展名自动处理格式（md/txt/json/csv/xlsx/py等）。
+    
+    - append=true 时会在文件末尾追加（文本/CSV）
+    - overwrite=false 时若文件存在会报错
     
     Examples:
         fs_write("README.md", "# Title\n内容")
@@ -526,9 +533,15 @@ async def fs_ops(
     ],
     path: Annotated[str, Field(description="目标路径")],
     ctx: Context,
-    destination: Annotated[str, Field(description="move的目标路径")] = "",
+    destination: Annotated[str, Field(description="仅move：目标路径（必填）")] = "",
 ) -> Any:
     """文件系统操作：列目录、创建目录、移动/重命名、获取信息、删除。
+    
+    - list: 列出目录内容
+    - mkdir: 创建目录
+    - move: 移动/重命名（destination 必填）
+    - info: 获取文件/目录信息（Excel 包含元数据）
+    - delete: 删除文件/目录（递归）
     
     Examples:
         fs_ops("list", "/")
@@ -561,13 +574,13 @@ async def fs_search(
     ],
     pattern: Annotated[str, Field(description="glob 模式或内容正则")],
     ctx: Context,
-    context_lines: Annotated[int, Field(description="content搜索返回匹配行前后的上下文行数")] = 2,
+    context_lines: Annotated[int, Field(description="仅content：返回匹配行前后的上下文行数")] = 2,
 ) -> Any:
     """搜索workspace内的文件。
     
-    - glob：文件名 glob，默认起点=工作区根，不区分大小写
-    - content：内容搜索，默认使用正则，最大返回 20 条
-    - context_lines：仅对 content 搜索有效，指定返回匹配行前后的上下文行数
+    - glob：文件名 glob，起点=工作区根，不区分大小写
+    - content：内容搜索，默认正则，最大返回 20 条
+    - context_lines：仅对 content 搜索有效
     """
     try:
         components = await get_session_components(ctx)
@@ -594,10 +607,13 @@ async def fs_search(
 @mcp.tool()
 async def fs_replace(
     path: Annotated[str, Field(description="文件路径")],
-    diff: Annotated[str, Field(description="SEARCH/REPLACE diff文本")],
+    diff: Annotated[str, Field(description="SEARCH/REPLACE diff 文本（严格匹配）")],
     ctx: Context
 ) -> Any:
     """精确编辑文件内容，使用 SEARCH/REPLACE diff 语法。
+    
+    - SEARCH/REPLACE 必须完整匹配原文
+    - 支持多段 diff（按顺序依次替换）
 
     Examples:
         fs_replace("config.py", diff=\"\"\"
@@ -645,9 +661,9 @@ if _is_kb_enabled():
     async def kb_read(
         url: Annotated[str, Field(description="File URL returned by kb_search (e.g. '/api/s/xxx')")],
         ctx: Context,
-        offset: Annotated[int, Field(description="可选，字符偏移量，用于分页读取")] = 0,
-        collection_ids: Annotated[List[str], Field(description="可选，collectionId 列表，用于片段检索")] = [],
-        text: Annotated[str, Field(description="可选，当使用 collection_ids 时的查询文本")] = "",
+        offset: Annotated[int, Field(description="可选：字符偏移量，用于分页读取")] = 0,
+        collection_ids: Annotated[List[str], Field(description="可选：collectionId 列表，用于片段检索")] = [],
+        text: Annotated[str, Field(description="可选：当使用 collection_ids 时的查询文本")] = "",
     ) -> Any:
         """读取知识库文件或按 collectionIds 检索片段，并返回 Markdown 文本。"""
         try:
@@ -667,7 +683,7 @@ if _is_web_crawl_enabled():
     async def crawl_url(
         url: Annotated[str, Field(description="目标网站 URL")],
         ctx: Context,
-        offset: Annotated[int, Field(description="可选，字符偏移量，用于分页截断")] = 0,
+        offset: Annotated[int, Field(description="可选：字符偏移量，用于分页截断")] = 0,
     ) -> Any:
         """抓取网页并返回 Markdown。"""
         try:
@@ -692,7 +708,7 @@ if _is_web_search_enabled():
     async def web_search(
         query: Annotated[str, Field(description="搜索关键词或语义查询")],
         ctx: Context,
-        count: Annotated[int, Field(description="可选，返回条数")] = 10,
+        count: Annotated[int, Field(description="可选：返回条数（0/-1表示默认）")] = 10,
     ) -> Any:
         """调用联网搜索，返回搜索结果。"""
         try:
@@ -719,22 +735,23 @@ async def excel_edit(
         Field(description="cells|format")
     ],
     ctx: Context,
-    sheet: Annotated[str, Field(description="工作表名")] = "",
+    sheet: Annotated[str, Field(description="工作表名（空=第一个）")] = "",
     # cells: 批量更新单元格
     updates: Annotated[
         List[Dict[str, Any]],
         Field(description="cells: [{cell,value},...]")
     ] = [],
     # format: 格式化范围
-    range: Annotated[str, Field(description="format/range: A1:C10")] = "",
+    range: Annotated[str, Field(description="format：格式化范围，如A1:C10")] = "",
     style: Annotated[
         Dict[str, Any],
-        Field(description="format: {bold,bg_color}")
+        Field(description="format：样式，如{bold,bg_color}")
     ] = {},
 ) -> Any:
-    """编辑Excel文件。
-    - cells: 批量更新单元格值
-    - format: 加粗/改背景色
+    """编辑Excel文件（仅暴露 cells/format 两类操作）。
+    
+    - cells: 批量更新单元格值（updates 必填）
+    - format: 加粗/改背景色（range + style 必填）
     
     Examples:
         excel_edit("data.xlsx", "cells", updates=[{"cell":"A1","value":"Hello"}])
@@ -779,9 +796,9 @@ async def excel_edit(
 @mcp.tool()
 async def exec(
     ctx: Context,
-    code: Annotated[str, Field(description="代码字符串")] = "",
-    file: Annotated[str, Field(description="文件路径（与code二选一）")] = "",
-    args: Annotated[List[str], Field(description="命令行参数")] = [],
+    code: Annotated[str, Field(description="Python 代码字符串（与file二选一）")] = "",
+    file: Annotated[str, Field(description="Python 文件路径（与code二选一）")] = "",
+    args: Annotated[List[str], Field(description="文件执行时的命令行参数（仅file生效）")] = [],
 ) -> Any:
     """执行Python代码或文件。code和file二选一。返回stdout/stderr/exit_code。
     
@@ -811,10 +828,13 @@ async def exec(
 
 @mcp.tool()
 async def preview_frontend(
-    entry_file: Annotated[str, Field(description="入口HTML文件")] = "index.html",
+    entry_file: Annotated[str, Field(description="入口HTML文件（相对工作区路径）")] = "index.html",
     ctx: Context = None,
 ) -> Any:
     """部署静态前端到预览服务器，返回可访问的URL。
+    
+    - 仅在 session 模式可用（需要 user_id/chat_id）
+    - entry_file 支持子目录，如 "dist/index.html"
     
     Examples:
         preview_frontend()  # 默认 index.html
@@ -849,7 +869,7 @@ async def preview_frontend(
 
 @mcp.tool()
 async def list_excel_templates(ctx: Context) -> Any:
-    """列出可用的Excel模板。返回模板标题和描述，用于create_excel_from_template。"""
+    """列出可用的Excel模板。返回模板标题和描述，用于 create_excel_from_template。"""
     try:
         components = await get_session_components(ctx)
         excel = components["excel"]
@@ -863,10 +883,10 @@ async def list_excel_templates(ctx: Context) -> Any:
 async def create_excel_from_template(
     template_title: Annotated[str, Field(description="模板标题（来自list_excel_templates）")],
     ctx: Context,
-    file_name: Annotated[str, Field(description="新文件名（可选）")] = "",
-    directory: Annotated[str, Field(description="目标目录（可选）")] = "",
+    file_name: Annotated[str, Field(description="新文件名（可选，带扩展名 .xlsx）")] = "",
+    directory: Annotated[str, Field(description="目标目录（可选，相对工作区）")] = "",
 ) -> Any:
-    """从模板创建Excel文件，使用excel_edit填充数据即可"""
+    """从模板创建Excel文件，使用 excel_edit 填充数据即可。"""
     try:
         components = await get_session_components(ctx)
         excel = components["excel"]
@@ -887,11 +907,11 @@ async def create_excel_from_template(
 async def generate_image(
     mermaid_code: Annotated[
         str,
-        Field(description="时序图、流程图等逻辑关系图使用，渲染为PNG图片。（与html_code二选一）")
+        Field(description="时序图/流程图等 Mermaid 语法，渲染为PNG图片（与html_code二选一）")
     ] = "",
     html_code: Annotated[
         str,
-        Field(description="HTML代码，图表、graph、架构图等使用，渲染为PNG图片。")
+        Field(description="HTML代码（用于图表/架构图渲染为PNG，优先用于复杂布局）")
     ] = "",
     ctx: Context = None,
 ) -> Any:

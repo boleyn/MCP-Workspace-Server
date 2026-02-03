@@ -5,7 +5,7 @@
 - fs_write: 创建/覆盖文件（自动识别格式，包括 text/md/xlsx/python/html）
 - fs_ops: 文件系统操作（列目录、创建目录、移动文件、获取信息）
 - fs_search: 搜索文件名或内容
-- excel_edit: 编辑 Excel 文件（单元格/格式/公式/工作表/行列/图表）
+- excel_edit: 编辑 Excel 文件（单元格/格式）
 - exec: 执行 Python 命令
 - preview_frontend: 前端项目部署（保持不变）
 - list_excel_templates: 列出 Excel 模板（保持不变）
@@ -78,4 +78,3 @@ if _web_crawl_enabled:
 
 if _web_search_enabled:
     __all__.append("web_search")
-
